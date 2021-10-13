@@ -53,14 +53,13 @@ public:
     void setPropertyTypeValues(int index, const QStringList &values);
     void removePropertyTypes(const QModelIndexList &indexes);
 
+    QModelIndex addNewPropertyType(PropertyType::Type type);
+
 signals:
     void nameChanged(const QModelIndex &index, const PropertyType &type);
 
-public slots:
-    QModelIndex addNewPropertyType();
-
 private:
-    QString nextPropertyTypeName() const;
+    QString nextPropertyTypeName(PropertyType::Type type) const;
 
     SharedPropertyTypes mPropertyTypes;
 };

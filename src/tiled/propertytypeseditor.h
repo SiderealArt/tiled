@@ -24,7 +24,12 @@
 
 #include <QDialog>
 
+class QLabel;
+class QStackedLayout;
 class QStringListModel;
+class QTreeView;
+
+class QtTreePropertyBrowser;
 
 namespace Ui {
 class PropertyTypesEditor;
@@ -32,6 +37,7 @@ class PropertyTypesEditor;
 
 namespace Tiled {
 
+class CustomPropertiesHelper;
 class PropertyTypesModel;
 
 class PropertyTypesEditor : public QDialog
@@ -50,7 +56,7 @@ protected:
     void changeEvent(QEvent *e) override;
 
 private:
-    void addPropertyType();
+    void addPropertyType(PropertyType::Type type);
     void selectedPropertyTypesChanged();
     void removeSelectedPropertyTypes();
     QModelIndex selectedPropertyTypeIndex() const;
@@ -74,13 +80,19 @@ private:
 
     Ui::PropertyTypesEditor *mUi;
     PropertyTypesModel *mPropertyTypesModel;
+    QTreeView *mValuesView;
     QStringListModel *mValuesModel;
+    QtTreePropertyBrowser *mMembersView;
+    CustomPropertiesHelper *mPropertiesHelper;
+    QStackedLayout *mValuesAndMembersStack;
+    QLabel *mValuesOrMembersLabel;
 
     bool mSettingPrefPropertyTypes = false;
     bool mSettingName = false;
     bool mUpdatingValues = false;
 
-    QAction *mAddPropertyTypeAction;
+    QAction *mAddEnumPropertyTypeAction;
+    QAction *mAddClassPropertyTypeAction;
     QAction *mRemovePropertyTypeAction;
 
     QAction *mAddValueAction;

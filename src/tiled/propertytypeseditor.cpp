@@ -21,20 +21,24 @@
 #include "propertytypeseditor.h"
 #include "ui_propertytypeseditor.h"
 
-#include "propertytypesmodel.h"
+#include "custompropertieshelper.h"
 #include "object.h"
 #include "preferences.h"
 #include "project.h"
 #include "projectmanager.h"
+#include "propertytypesmodel.h"
 #include "utils.h"
 #include "varianteditorfactory.h"
 #include "variantpropertymanager.h"
 
 #include <QCloseEvent>
 #include <QScopedValueRollback>
+#include <QStackedLayout>
 #include <QStringListModel>
 #include <QStyledItemDelegate>
 #include <QToolBar>
+
+#include <QtTreePropertyBrowser>
 
 #include "qtcompat_p.h"
 
@@ -44,17 +48,36 @@ PropertyTypesEditor::PropertyTypesEditor(QWidget *parent)
     : QDialog(parent)
     , mUi(new Ui::PropertyTypesEditor)
     , mPropertyTypesModel(new PropertyTypesModel(this))
+    , mValuesView(new QTreeView)
     , mValuesModel(new QStringListModel(this))
+    , mMembersView(new QtTreePropertyBrowser)
+    , mPropertiesHelper(new CustomPropertiesHelper(mMembersView, this))
+    , mValuesAndMembersStack(new QStackedLayout)
+    , mValuesOrMembersLabel(new QLabel(tr("Values")))
 {
     mUi->setupUi(this);
+
+    mValuesView->setRootIsDecorated(false);
+    mValuesView->setUniformRowHeights(true);
+    mValuesView->setHeaderHidden(true);
+
+    mValuesAndMembersStack->addWidget(mValuesView);
+    mValuesAndMembersStack->addWidget(mMembersView);
+
+    auto valuesAndMembersWithToolBarLayout = new QVBoxLayout;
+    valuesAndMembersWithToolBarLayout->addItem(mValuesAndMembersStack);
+
+    mUi->formLayout->addRow(mValuesOrMembersLabel, valuesAndMembersWithToolBarLayout);
+
     resize(Utils::dpiScaled(size()));
 
     mUi->propertyTypesView->setModel(mPropertyTypesModel);
 
-    mUi->valuesView->setModel(mValuesModel);
-    mUi->valuesView->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    mValuesView->setModel(mValuesModel);
+    mValuesView->setSelectionMode(QAbstractItemView::ExtendedSelection);
 
-    mAddPropertyTypeAction = new QAction(this);
+    mAddEnumPropertyTypeAction = new QAction(this);
+    mAddClassPropertyTypeAction = new QAction(this);
     mRemovePropertyTypeAction = new QAction(this);
     mAddValueAction = new QAction(this);
     mRemoveValueAction = new QAction(this);
@@ -67,13 +90,15 @@ PropertyTypesEditor::PropertyTypesEditor(QWidget *parent)
     QIcon addIcon(QLatin1String(":/images/22/add.png"));
     QIcon removeIcon(QLatin1String(":/images/22/remove.png"));
 
-    mAddPropertyTypeAction->setIcon(addIcon);
+    mAddEnumPropertyTypeAction->setIcon(addIcon);
+    mAddClassPropertyTypeAction->setIcon(addIcon);
     mRemovePropertyTypeAction->setIcon(removeIcon);
     mRemovePropertyTypeAction->setPriority(QAction::LowPriority);
     mAddValueAction->setIcon(addIcon);
     mRemoveValueAction->setIcon(removeIcon);
 
-    Utils::setThemeIcon(mAddPropertyTypeAction, "add");
+    Utils::setThemeIcon(mAddEnumPropertyTypeAction, "add");
+    Utils::setThemeIcon(mAddClassPropertyTypeAction, "add");
     Utils::setThemeIcon(mRemovePropertyTypeAction, "remove");
     Utils::setThemeIcon(mAddValueAction, "add");
     Utils::setThemeIcon(mRemoveValueAction, "remove");
@@ -84,7 +109,8 @@ PropertyTypesEditor::PropertyTypesEditor(QWidget *parent)
     QToolBar *propertyTypesToolBar = new QToolBar(this);
     propertyTypesToolBar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     propertyTypesToolBar->setIconSize(Utils::smallIconSize());
-    propertyTypesToolBar->addAction(mAddPropertyTypeAction);
+    propertyTypesToolBar->addAction(mAddEnumPropertyTypeAction);
+    propertyTypesToolBar->addAction(mAddClassPropertyTypeAction);
     propertyTypesToolBar->addAction(mRemovePropertyTypeAction);
 
     QToolBar *propertiesToolBar = new QToolBar(this);
@@ -94,17 +120,19 @@ PropertyTypesEditor::PropertyTypesEditor(QWidget *parent)
     propertiesToolBar->addAction(mRemoveValueAction);
 
     mUi->propertyTypesLayout->addWidget(propertyTypesToolBar);
-    mUi->typeDetailsLayout->addWidget(propertiesToolBar);
+    valuesAndMembersWithToolBarLayout->addWidget(propertiesToolBar);
 
     connect(mUi->propertyTypesView->selectionModel(), &QItemSelectionModel::selectionChanged,
             this, &PropertyTypesEditor::selectedPropertyTypesChanged);
-    connect(mUi->valuesView->selectionModel(), &QItemSelectionModel::selectionChanged,
+    connect(mValuesView->selectionModel(), &QItemSelectionModel::selectionChanged,
             this, &PropertyTypesEditor::updateActions);
     connect(mPropertyTypesModel, &PropertyTypesModel::modelReset,
             this, &PropertyTypesEditor::selectFirstPropertyType);
 
-    connect(mAddPropertyTypeAction, &QAction::triggered,
-            this, &PropertyTypesEditor::addPropertyType);
+    connect(mAddEnumPropertyTypeAction, &QAction::triggered,
+            this, [this] { addPropertyType(PropertyType::PT_Enum); });
+    connect(mAddClassPropertyTypeAction, &QAction::triggered,
+            this, [this] { addPropertyType(PropertyType::PT_Class); });
     connect(mRemovePropertyTypeAction, &QAction::triggered,
             this, &PropertyTypesEditor::removeSelectedPropertyTypes);
 
@@ -168,16 +196,19 @@ void PropertyTypesEditor::changeEvent(QEvent *e)
 
 void PropertyTypesEditor::retranslateUi()
 {
-    mAddPropertyTypeAction->setText(tr("Add Enum"));
-    mRemovePropertyTypeAction->setText(tr("Remove Enum"));
+    mAddEnumPropertyTypeAction->setText(tr("Add Enum"));
+    mAddClassPropertyTypeAction->setText(tr("Add Class"));
+    mRemovePropertyTypeAction->setText(tr("Remove Type"));
 
     mAddValueAction->setText(tr("Add Value"));
     mRemoveValueAction->setText(tr("Remove Value"));
 }
 
-void PropertyTypesEditor::addPropertyType()
+void PropertyTypesEditor::addPropertyType(PropertyType::Type type)
 {
-    const QModelIndex newIndex = mPropertyTypesModel->addNewPropertyType();
+    const QModelIndex newIndex = mPropertyTypesModel->addNewPropertyType(type);
+    if (!newIndex.isValid())
+        return;
 
     // Select and focus the new row and ensure it is visible
     QItemSelectionModel *sm = mUi->propertyTypesView->selectionModel();
@@ -280,14 +311,14 @@ void PropertyTypesEditor::addValue()
     const QString valueText = nextValueText(*static_cast<const EnumPropertyType*>(propertyType));
 
     const auto valueIndex = mValuesModel->index(row);
-    mUi->valuesView->setCurrentIndex(valueIndex);
+    mValuesView->setCurrentIndex(valueIndex);
     mValuesModel->setData(valueIndex, valueText, Qt::DisplayRole);
-    mUi->valuesView->edit(valueIndex);
+    mValuesView->edit(valueIndex);
 }
 
 void PropertyTypesEditor::removeValues()
 {
-    const QItemSelection selection = mUi->valuesView->selectionModel()->selection();
+    const QItemSelection selection = mValuesView->selectionModel()->selection();
     for (const QItemSelectionRange &range : selection)
         mValuesModel->removeRows(range.top(), range.height());
 }
@@ -315,7 +346,7 @@ void PropertyTypesEditor::updateValues()
 void PropertyTypesEditor::updateActions()
 {
     const auto selectedTypeIndex = selectedPropertyTypeIndex();
-    const auto valuesSelectionModel = mUi->valuesView->selectionModel();
+    const auto valuesSelectionModel = mValuesView->selectionModel();
     const auto selectedValues = valuesSelectionModel->selectedRows();
 
     mAddValueAction->setEnabled(selectedTypeIndex.isValid());
